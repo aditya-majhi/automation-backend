@@ -1,8 +1,8 @@
-////typescript
-// filepath: d:\AutomationModule\AutomationBackend\src\services\recording.service.ts
 import { Prisma } from "@prisma/client";
 import prisma from "../config/database";
 import { CreateRecordingInput } from "../schemas/recording.schema";
+import { saveSteps } from "./step.service";
+import { saveVariables } from "./variable.service";
 
 export const createRecording = async (
     input: CreateRecordingInput,
@@ -21,14 +21,28 @@ export const createRecording = async (
         throw new Error("Test case not found");
     }
 
-    return prisma.recording.create({
+    const recording = await prisma.recording.create({
         data: {
             testCaseId: input.testCaseId,
             steps: input.steps as Prisma.InputJsonValue,
-            variables: {
-                set: (input.variables ?? []) as Prisma.InputJsonValue[],
-            },
+            variables: (input.variables ?? []) as Prisma.InputJsonValue,
             videoUrl: input.videoUrl ?? null,
+        },
+    });
+
+    // Persist steps to the Step table for structured querying
+    await saveSteps(recording.id, input.steps);
+
+    // Persist variables to the Variable table for the Design UI
+    await saveVariables(input.testCaseId, recording.id, input.variables ?? []);
+
+    // Return recording with related data
+    // Use relation names (structuredSteps, structuredVars) — NOT the JSON scalar fields (steps, variables)
+    return prisma.recording.findUnique({
+        where: { id: recording.id },
+        include: {
+            structuredSteps: { orderBy: { stepOrder: "asc" } },
+            structuredVars: { orderBy: { createdAt: "asc" } },
         },
     });
 };
@@ -53,5 +67,9 @@ export const getRecordingsByTestCase = async (
     return prisma.recording.findMany({
         where: { testCaseId },
         orderBy: { createdAt: "desc" },
+        include: {
+            structuredSteps: { orderBy: { stepOrder: "asc" } },
+            structuredVars: { orderBy: { createdAt: "asc" } },
+        },
     });
 };

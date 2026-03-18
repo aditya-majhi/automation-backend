@@ -9,8 +9,13 @@ import projectRoutes from "./routes/project.routes.js";
 import moduleRoutes from "./routes/module.routes.js";
 import testCaseRoutes from "./routes/testcase.routes.js";
 import recordingRoutes from "./routes/recording.routes.js";
+import variableRoutes from "./routes/variable.router.js";
 
 const app = express();
+
+(BigInt.prototype as any).toJSON = function () {
+    return Number(this);
+};
 
 // ── CORS ──
 app.use(
@@ -43,6 +48,7 @@ app.use("/projects", authenticate, projectRoutes);
 app.use("/modules", authenticate, moduleRoutes);
 app.use("/testcases", authenticate, testCaseRoutes);
 app.use("/recordings", authenticate, recordingRoutes);
+app.use("/variables", authenticate, variableRoutes);
 
 app.use(errorHandler);
 
