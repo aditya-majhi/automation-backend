@@ -46,6 +46,7 @@ interface RawVariable {
     pageUrl?: string;
     pageTitle?: string;
     pageName?: string;
+    capture?: { text?: string | null; value?: any } | null; // <-- NEW
 }
 
 const DATA_TYPE_MAP: Record<string, DataType> = {
@@ -64,11 +65,13 @@ const DATA_TYPE_MAP: Record<string, DataType> = {
     file: "file",
     enum_type: "enum_type",
     enum: "enum_type",
+    button: "string",
 };
 
 const CONTEXT_MAP: Record<string, VariableContext> = {
     formField: "formField",
     table: "table",
+    button: "button",
     modal: "modal",
     sidebar: "sidebar",
     navbar: "navbar",
@@ -93,7 +96,7 @@ function mapDataType(dt: string | undefined): DataType {
 }
 
 function mapKind(kind: string | undefined): VariableKind {
-    return kind === "output" ? "output" : "input";
+    return kind === "output" ? "output" : kind === "button" ? "button" : "input";
 }
 
 export async function saveVariables(
@@ -112,8 +115,23 @@ export async function saveVariables(
 
         const rawCtx = typeof v.context === "object" ? v.context : null;
 
+        // Merge capture into contextMeta if present
+        let contextMeta: any = rawCtx || {};
+        if (v.capture) {
+            contextMeta = { ...contextMeta, capture: v.capture };
+        }
+
+        const normalizedName =
+            ((v.name || "var")
+                .trim()
+                .replace(/\s+/g, "_")
+                .replace(/[^\w]/g, "_")
+                .replace(/_+/g, "_")
+                .replace(/^_+|_+$/g, "")
+                .slice(0, 80)) || "var";
+
         const data = {
-            name: v.name,
+            name: normalizedName,
             kind,
             context,
             dataType,
@@ -130,13 +148,13 @@ export async function saveVariables(
             pageUrl: v.pageUrl || null,
             pageTitle: v.pageTitle || null,
             pageName: v.pageName || null,
-            contextMeta: rawCtx || null,
+            contextMeta: Object.keys(contextMeta).length ? contextMeta : null,
             testCaseId,
             recordingId: recordingId || null,
         };
 
         const existing = await prisma.variable.findFirst({
-            where: { testCaseId, name: v.name, kind },
+            where: { testCaseId, name: normalizedName, kind },
         });
 
         let saved;
@@ -155,6 +173,7 @@ export async function saveVariables(
     return results;
 }
 
+
 export async function getVariablesByTestCase(testCaseId: string) {
     const variables = await prisma.variable.findMany({
         where: { testCaseId },
@@ -164,6 +183,7 @@ export async function getVariablesByTestCase(testCaseId: string) {
     return {
         input: variables.filter((v) => v.kind === "input"),
         output: variables.filter((v) => v.kind === "output"),
+        button: variables.filter((v) => v.kind === "button"),
         all: variables,
     };
 }

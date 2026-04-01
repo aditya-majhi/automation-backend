@@ -4,72 +4,97 @@ import { CreateRecordingInput } from "../schemas/recording.schema";
 import { saveSteps } from "./step.service";
 import { saveVariables } from "./variable.service";
 
+const isAdminUser = async (userId: string) => {
+  const adminRole = await prisma.userRole.findFirst({
+    where: { userId, role: "ADMIN" },
+    select: { id: true },
+  });
+  return Boolean(adminRole);
+};
+
+const testCaseAccessWhere = (userId: string, isAdmin: boolean) => {
+  if (isAdmin) {
+    return {
+      module: {
+        project: {
+          OR: [{ userId }, { projectUsers: { some: { userId } } }],
+        },
+      },
+    };
+  }
+
+  return {
+    module: {
+      project: {
+        projectUsers: { some: { userId } },
+      },
+    },
+  };
+};
+
 export const createRecording = async (
-    input: CreateRecordingInput,
-    userId: string,
+  input: CreateRecordingInput,
+  userId: string,
 ) => {
-    const testCase = await prisma.testCase.findFirst({
-        where: {
-            id: input.testCaseId,
-            module: {
-                project: { userId },
-            },
-        },
-    });
+  const isAdmin = await isAdminUser(userId);
 
-    if (!testCase) {
-        throw new Error("Test case not found");
-    }
+  const testCase = await prisma.testCase.findFirst({
+    where: {
+      id: input.testCaseId,
+      ...testCaseAccessWhere(userId, isAdmin),
+    },
+    select: { id: true },
+  });
 
-    const recording = await prisma.recording.create({
-        data: {
-            testCaseId: input.testCaseId,
-            steps: input.steps as Prisma.InputJsonValue,
-            variables: (input.variables ?? []) as Prisma.InputJsonValue,
-            videoUrl: input.videoUrl ?? null,
-        },
-    });
+  if (!testCase) {
+    throw new Error("Test case not found");
+  }
 
-    // Persist steps to the Step table for structured querying
-    await saveSteps(recording.id, input.steps);
+  const recording = await prisma.recording.create({
+    data: {
+      testCaseId: input.testCaseId,
+      steps: input.steps as Prisma.InputJsonValue,
+      variables: (input.variables ?? []) as Prisma.InputJsonValue,
+      videoUrl: input.videoUrl ?? null,
+    },
+  });
 
-    // Persist variables to the Variable table for the Design UI
-    await saveVariables(input.testCaseId, recording.id, input.variables ?? []);
+  await saveSteps(recording.id, input.steps);
+  await saveVariables(input.testCaseId, recording.id, input.variables ?? []);
 
-    // Return recording with related data
-    // Use relation names (structuredSteps, structuredVars) — NOT the JSON scalar fields (steps, variables)
-    return prisma.recording.findUnique({
-        where: { id: recording.id },
-        include: {
-            structuredSteps: { orderBy: { stepOrder: "asc" } },
-            structuredVars: { orderBy: { createdAt: "asc" } },
-        },
-    });
+  return prisma.recording.findUnique({
+    where: { id: recording.id },
+    include: {
+      structuredSteps: { orderBy: { stepOrder: "asc" } },
+      structuredVars: { orderBy: { createdAt: "asc" } },
+    },
+  });
 };
 
 export const getRecordingsByTestCase = async (
-    testCaseId: string,
-    userId: string,
+  testCaseId: string,
+  userId: string,
 ) => {
-    const testCase = await prisma.testCase.findFirst({
-        where: {
-            id: testCaseId,
-            module: {
-                project: { userId },
-            },
-        },
-    });
+  const isAdmin = await isAdminUser(userId);
 
-    if (!testCase) {
-        throw new Error("Test case not found");
-    }
+  const testCase = await prisma.testCase.findFirst({
+    where: {
+      id: testCaseId,
+      ...testCaseAccessWhere(userId, isAdmin),
+    },
+    select: { id: true },
+  });
 
-    return prisma.recording.findMany({
-        where: { testCaseId },
-        orderBy: { createdAt: "desc" },
-        include: {
-            structuredSteps: { orderBy: { stepOrder: "asc" } },
-            structuredVars: { orderBy: { createdAt: "asc" } },
-        },
-    });
+  if (!testCase) {
+    throw new Error("Test case not found");
+  }
+
+  return prisma.recording.findMany({
+    where: { testCaseId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      structuredSteps: { orderBy: { stepOrder: "asc" } },
+      structuredVars: { orderBy: { createdAt: "asc" } },
+    },
+  });
 };

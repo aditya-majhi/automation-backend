@@ -6,8 +6,13 @@ export const createRecordingSchema = z.object({
     steps: z.array(z.any()),
     variables: z.array(z.object({
       id: z.string().optional(),
+      pageName: z.string().nullable().optional(),
+      capture: z.object({
+        text: z.string().nullable().optional(),
+        value: z.any().nullable().optional(),
+      }).optional(),
       name: z.string(),
-      kind: z.enum(["input", "output"]),
+      kind: z.enum(["input", "output", "button"]),
       selector: z.object({
         css: z.string().nullable().optional(),
         xpath: z.string().nullable().optional(),

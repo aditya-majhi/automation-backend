@@ -1,47 +1,74 @@
 import prisma from "../config/database";
 import { CreateTestCaseInput } from "../schemas/testcase.schema";
 
-export const createTestCase = async (
-    input: CreateTestCaseInput,
-    userId: string
-) => {
-    const module = await prisma.module.findFirst({
-        where: {
-            id: input.moduleId,
-            project: { userId },
-        },
-    });
-
-    if (!module) {
-        throw new Error("Module not found");
-    }
-
-    return prisma.testCase.create({
-        data: {
-            name: input.name,
-            description: input.description,
-            moduleId: input.moduleId,
-        },
-    });
+const isAdminUser = async (userId: string) => {
+  const adminRole = await prisma.userRole.findFirst({
+    where: { userId, role: "ADMIN" },
+    select: { id: true },
+  });
+  return Boolean(adminRole);
 };
 
-export const getTestCasesByModule = async (
-    moduleId: string,
-    userId: string
+const moduleAccessWhere = (userId: string, isAdmin: boolean) => {
+  if (isAdmin) {
+    return {
+      project: {
+        OR: [{ userId }, { projectUsers: { some: { userId } } }],
+      },
+    };
+  }
+
+  return {
+    project: {
+      projectUsers: { some: { userId } },
+    },
+  };
+};
+
+export const createTestCase = async (
+  input: CreateTestCaseInput,
+  userId: string,
 ) => {
-    const module = await prisma.module.findFirst({
-        where: {
-            id: moduleId,
-            project: { userId },
-        },
-    });
+  const isAdmin = await isAdminUser(userId);
 
-    if (!module) {
-        throw new Error("Module not found");
-    }
+  const module = await prisma.module.findFirst({
+    where: {
+      id: input.moduleId,
+      ...moduleAccessWhere(userId, isAdmin),
+    },
+    select: { id: true },
+  });
 
-    return prisma.testCase.findMany({
-        where: { moduleId },
-        orderBy: { createdAt: "desc" },
-    });
+  if (!module) {
+    throw new Error("Module not found");
+  }
+
+  return prisma.testCase.create({
+    data: {
+      name: input.name,
+      description: input.description,
+      moduleId: input.moduleId,
+    },
+  });
+};
+
+export const getTestCasesByModule = async (moduleId: string, userId: string) => {
+  const isAdmin = await isAdminUser(userId);
+
+  const module = await prisma.module.findFirst({
+    where: {
+      id: moduleId,
+      ...moduleAccessWhere(userId, isAdmin),
+    },
+    select: { id: true },
+  });
+
+  if (!module) {
+    throw new Error("Module not found");
+  }
+
+  return prisma.testCase.findMany({
+    where: { moduleId },
+    orderBy: { createdAt: "desc" },
+  });
 };

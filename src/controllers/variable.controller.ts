@@ -36,10 +36,15 @@ export const getVariables = async (
             sendSuccess(res, { variables: result.output }, "Output variables fetched");
             return;
         }
+        if (kind === "button") {
+            sendSuccess(res, { variables: result.button }, "Button variables fetched");
+            return;
+        }
+
 
         sendSuccess(res, {
             variables: result.all,
-            grouped: { input: result.input, output: result.output },
+            grouped: { input: result.input, output: result.output, button: result.button },
         }, "Variables fetched");
     } catch (err) {
         next(err);

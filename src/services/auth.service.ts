@@ -1,62 +1,114 @@
-import bcrypt from "bcrypt";
+// d:\AutomationModule\AutomationBackend\src\services\auth.service.ts
 import prisma from "../config/database";
+import bcrypt from "bcrypt";
+import { Role } from "@prisma/client";
 import { signToken } from "../utils/jwt";
-import { RegisterInput, LoginInput } from "../schemas/auth.schema";
 
-export const registerUser = async (input: RegisterInput) => {
-  const existingUser = await prisma.user.findUnique({
-    where: { email: input.email },
+const getDefaultRole = async (): Promise<Role> => {
+  const adminExists = await prisma.userRole.findFirst({
+    where: { role: "ADMIN" },
+    select: { id: true },
   });
 
-  if (existingUser) {
-    throw new Error("User with this email already exists");
+  return adminExists ? "EXECUTE_PROJECTS" : "ADMIN";
+};
+
+const ensureUserHasRole = async (userId: string): Promise<string[]> => {
+  const existingRoles = await prisma.userRole.findMany({
+    where: { userId },
+    select: { role: true },
+  });
+
+  if (existingRoles.length > 0) {
+    return existingRoles.map((r) => r.role);
   }
 
-  const hashedPassword = await bcrypt.hash(input.password, 12);
+  const fallbackRole = await getDefaultRole();
+
+  await prisma.userRole.createMany({
+    data: [{ userId, role: fallbackRole }],
+    skipDuplicates: true,
+  });
+
+  const updatedRoles = await prisma.userRole.findMany({
+    where: { userId },
+    select: { role: true },
+  });
+
+  return updatedRoles.map((r) => r.role);
+};
+
+export const register = async (
+  email: string,
+  password: string,
+  name: string,
+) => {
+  const existingUser = await prisma.user.findUnique({ where: { email } });
+  if (existingUser) {
+    throw new Error("User already exists");
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const defaultRole = await getDefaultRole();
 
   const user = await prisma.user.create({
     data: {
-      name: input.name,
-      email: input.email,
+      email,
       password: hashedPassword,
+      name,
+      roles: {
+        create: [{ role: defaultRole }],
+      },
     },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      createdAt: true,
+    include: {
+      roles: { select: { role: true } },
     },
   });
-
-  const token = signToken({ userId: user.id, email: user.email });
-
-  return { user, token };
-};
-
-export const loginUser = async (input: LoginInput) => {
-  const user = await prisma.user.findUnique({
-    where: { email: input.email },
-  });
-
-  if (!user) {
-    throw new Error("Invalid email or password");
-  }
-
-  const isPasswordValid = await bcrypt.compare(input.password, user.password);
-
-  if (!isPasswordValid) {
-    throw new Error("Invalid email or password");
-  }
 
   const token = signToken({ userId: user.id, email: user.email });
 
   return {
+    token,
     user: {
       id: user.id,
-      name: user.name,
       email: user.email,
-      createdAt: user.createdAt,
+      name: user.name,
+      roles: user.roles.map((r) => r.role),
     },
+  };
+};
+
+export const login = async (email: string, password: string) => {
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: {
+      roles: { select: { role: true } },
+    },
+  });
+
+  if (!user) {
+    throw new Error("Invalid credentials");
+  }
+
+  if (!user.isActive) {
+    throw new Error("Account is deactivated. Contact your administrator.");
+  }
+
+  const isValidPassword = await bcrypt.compare(password, user.password);
+  if (!isValidPassword) {
+    throw new Error("Invalid credentials");
+  }
+
+  const roles = await ensureUserHasRole(user.id);
+  const token = signToken({ userId: user.id, email: user.email });
+
+  return {
     token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      roles,
+    },
   };
 };
